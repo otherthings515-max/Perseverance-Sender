@@ -1,0 +1,547 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <title>Perseverance Sender</title>
+  <script src="https://unpkg.com/peerjs@1.5.1/dist/peerjs.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/piexifjs@1.0.6/piexif.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js"></script>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+    :root {
+      --bg: #0f0f0f;
+      --surface: #1a1a1a;
+      --surface-light: #252525;
+      --text: #e4e4e4;
+      --text-secondary: #b0b0b0;
+      --accent: #6c5ce7;
+      --gradient: linear-gradient(135deg, #6c5ce7, #a29bfe, #fd79a8);
+    }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: 'Inter', sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      padding: 20px;
+    }
+    .container { width: 100%; max-width: 520px; }
+    .app-title {
+      text-align: center;
+      font-size: 2.2rem;
+      font-weight: 700;
+      background: var(--gradient);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+      filter: drop-shadow(0 0 18px rgba(108,92,231,0.6));
+      margin-bottom: 10px;
+    }
+    .subtitle { text-align: center; color: var(--text-secondary); margin-bottom: 25px; font-size: 0.95rem; }
+    .card {
+      background: var(--surface);
+      border: 1px solid rgba(255,255,255,0.06);
+      border-radius: 16px;
+      padding: 24px;
+      margin-bottom: 20px;
+      box-shadow: 0 12px 30px rgba(0,0,0,0.5);
+    }
+    .card h3 {
+      font-size: 1.2rem; font-weight: 600; margin-bottom: 18px;
+      border-bottom: 1px solid rgba(255,255,255,0.08); padding-bottom: 12px;
+    }
+    button, input {
+      width: 100%; padding: 14px 18px; margin: 8px 0;
+      border-radius: 12px; border: none; font-size: 15px; font-weight: 500;
+      background: var(--surface-light); color: var(--text);
+      border: 1px solid rgba(255,255,255,0.08); outline: none; cursor: pointer;
+    }
+    button {
+      background: var(--accent);
+      color: white; font-weight: 600;
+      box-shadow: 0 4px 15px rgba(108,92,231,0.3); border: none;
+    }
+    button:hover:not(:disabled) {
+      background: #7d6ff0; transform: translateY(-1px);
+      box-shadow: 0 6px 20px rgba(108,92,231,0.45);
+    }
+    button:active:not(:disabled) { transform: scale(0.98); }
+    button:disabled { opacity: 0.45; cursor: not-allowed; box-shadow: none; background: var(--surface-light); color: var(--text-secondary); }
+    input { background: var(--surface-light); color: var(--text); border: 1px solid rgba(255,255,255,0.1); }
+    input::placeholder { color: var(--text-secondary); }
+    #qrcode { display: flex; justify-content: center; margin: 15px 0; }
+    #qrcode canvas { border-radius: 12px; background: white; padding: 8px; }
+    .file-list {
+      max-height: 180px; overflow-y: auto; background: var(--surface-light);
+      border-radius: 10px; padding: 10px; margin: 8px 0; font-size: 13px; color: var(--text-secondary);
+    }
+    .progress-bar { height: 8px; background: rgba(255,255,255,0.08); border-radius: 4px; overflow: hidden; margin: 14px 0; }
+    .progress-fill { height: 100%; width: 0%; background: var(--gradient); border-radius: 4px; box-shadow: 0 0 12px #a29bfe; transition: width 0.4s; }
+    .status-text { font-size: 13px; color: var(--text-secondary); margin: 8px 0; }
+    .hidden { display: none !important; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="app-title">Perseverance Sender</div>
+    <div class="subtitle">Bulk transfer • metadata‑safe • resumes in background</div>
+
+    <!-- Sender Card -->
+    <div class="card">
+      <h3>📤 Sender</h3>
+      <button id="startSenderBtn">🟢 Start Sender (Get ID)</button>
+      <div id="senderReady" class="hidden">
+        <p style="margin:10px 0; word-break: break-all;">Your ID: <b id="myPeerId"></b></p>
+        <div id="qrcode"></div>
+        <button id="pickSendFolderBtn">📁 Select Image Folder</button>
+        <div id="sendFolderInfo" class="file-list"></div>
+        <button id="sendAllBtn" disabled>📨 Send All Files</button>
+        <p id="senderStatus" class="status-text"></p>
+        <div class="progress-bar hidden" id="senderProg"><div class="progress-fill" id="senderProgFill"></div></div>
+      </div>
+    </div>
+
+    <!-- Receiver Card -->
+    <div class="card">
+      <h3>📥 Receiver</h3>
+      <p class="status-text">Connect using Sender's ID</p>
+      <div style="display: flex; gap: 8px; margin-bottom: 8px;">
+        <button id="scanCameraBtn" style="flex:1;">📷 Scan QR Code</button>
+        <button id="scanGalleryBtn" style="flex:1;">🖼️ Scan from Gallery</button>
+      </div>
+      <!-- Hidden file inputs for scanning -->
+      <input type="file" id="cameraInput" accept="image/*" capture="environment" class="hidden">
+      <input type="file" id="galleryInput" accept="image/*" class="hidden">
+      <input type="text" id="remoteIdInput" placeholder="Sender's ID">
+      <button id="connectReceiverBtn">🔗 Connect</button>
+      <div id="receiverReady" class="hidden">
+        <button id="pickReceiveDirBtn">📁 Select Main Save Folder</button>
+        <div id="dateFolderChoice" class="hidden">
+          <p class="status-text">Folder organization:</p>
+          <button id="choiceCurrentDate">📅 Save in today's date folder</button>
+          <button id="choiceOriginalDate">📸 Save in original date folder (EXIF)</button>
+        </div>
+        <p id="receiverStatus" class="status-text"></p>
+        <div class="progress-bar hidden" id="receiverProg"><div class="progress-fill" id="receiverProgFill"></div></div>
+        <div id="receivedFileList" class="file-list"></div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // ================== GLOBAL STATE ==================
+    const DB_NAME = 'FileTransferResume', DB_VERSION = 1;
+    let db;
+    let audioCtx = null;
+    function startSilentAudio() {
+      if (audioCtx) return;
+      try {
+        audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        gain.gain.value = 0;
+        osc.connect(gain);
+        gain.connect(audioCtx.destination);
+        osc.start(0);
+        if (audioCtx.state === 'suspended') audioCtx.resume();
+      } catch(e) {}
+    }
+
+    // IndexedDB
+    function openDB() {
+      return new Promise((resolve, reject) => {
+        const req = indexedDB.open(DB_NAME, DB_VERSION);
+        req.onupgradeneeded = e => {
+          const db = e.target.result;
+          if (!db.objectStoreNames.contains('transfer')) db.createObjectStore('transfer', { keyPath: 'role' });
+        };
+        req.onsuccess = e => resolve(e.target.result);
+        req.onerror = e => reject(e.target.error);
+      });
+    }
+    async function saveDB(role, data) {
+      if (!db) db = await openDB();
+      return new Promise((resolve, reject) => {
+        const tx = db.transaction('transfer', 'readwrite');
+        tx.objectStore('transfer').put({ role, ...data });
+        tx.oncomplete = resolve;
+        tx.onerror = reject;
+      });
+    }
+    async function loadDB(role) {
+      if (!db) db = await openDB();
+      return new Promise((resolve, reject) => {
+        const tx = db.transaction('transfer', 'readonly');
+        const req = tx.objectStore('transfer').get(role);
+        req.onsuccess = () => resolve(req.result);
+        req.onerror = reject;
+      });
+    }
+
+    // Peer & connection vars
+    let peer, conn, remotePeerId = null;
+    let sendDirHandle = null, sendFileEntries = [], totalSendSize = 0, sendProgressMap = {};
+    let mainDirHandle = null, tempDirHandle = null, dateFolderMode = 'current', receiveMap = {}, receiveCurrentFile = null;
+
+    // ================== SENDER ==================
+    document.getElementById('startSenderBtn').addEventListener('click', async () => {
+      startSilentAudio();
+      peer = new Peer();
+      peer.on('open', async id => {
+        document.getElementById('myPeerId').textContent = id;
+        document.getElementById('senderReady').classList.remove('hidden');
+        new QRCode(document.getElementById('qrcode'), { text: id, width: 150, height: 150 });
+        await saveDB('sender', { remoteId: null, files: [] });
+        document.getElementById('senderStatus').textContent = 'Waiting for receiver connection...';
+      });
+      peer.on('connection', c => {
+        conn = c; setupSenderConnection(c);
+        document.getElementById('senderStatus').textContent = '✅ Receiver connected!';
+        if (sendFileEntries.length) document.getElementById('sendAllBtn').disabled = false;
+        remotePeerId = conn.peer;
+        saveDB('sender', { remoteId: conn.peer, files: sendFileEntries.map(f => f.name) });
+      });
+      peer.on('disconnected', () => {
+        document.getElementById('senderStatus').textContent = 'Connection lost. Reconnecting...';
+        tryReconnectSender();
+      });
+      document.getElementById('startSenderBtn').disabled = true;
+    });
+
+    function setupSenderConnection(c) {
+      c.on('data', data => {
+        if (typeof data === 'string') {
+          const msg = JSON.parse(data);
+          if (msg.type === 'resume-response') {
+            for (const f of msg.files) sendProgressMap[f.name] = f.receivedBytes || 0;
+            document.getElementById('senderStatus').textContent = 'Resume info received, restarting...';
+            resumeSending();
+          }
+        }
+      });
+      c.on('close', () => tryReconnectSender());
+    }
+
+    function tryReconnectSender() {
+      if (!remotePeerId) return;
+      let attempt = 0;
+      function attemptConnect() {
+        const delay = Math.min(1000 * Math.pow(2, attempt), 30000);
+        setTimeout(() => {
+          if (conn && conn.open) return;
+          try {
+            conn = peer.connect(remotePeerId, { reliable: true });
+            conn.on('open', () => {
+              attempt = 0;
+              setupSenderConnection(conn);
+              document.getElementById('senderStatus').textContent = 'Reconnected, requesting resume info...';
+              conn.send(JSON.stringify({ type: 'resume-request', files: sendFileEntries.map(f => ({ name: f.name, size: f.size })) }));
+            });
+            conn.on('error', () => { attempt++; attemptConnect(); });
+          } catch(e) { attempt++; attemptConnect(); }
+        }, delay);
+      }
+      attemptConnect();
+    }
+
+    document.getElementById('pickSendFolderBtn').addEventListener('click', async () => {
+      try {
+        sendDirHandle = await window.showDirectoryPicker();
+        sendFileEntries = [];
+        for await (const entry of sendDirHandle.values()) {
+          if (entry.kind === 'file' && /\.(jpg|jpeg|png|gif|bmp|webp|mp4|mov|avi|mkv)$/i.test(entry.name)) {
+            const file = await entry.getFile();
+            sendFileEntries.push({ name: entry.name, size: file.size, fileHandle: entry });
+          }
+        }
+        totalSendSize = sendFileEntries.reduce((s,f) => s+f.size, 0);
+        const info = document.getElementById('sendFolderInfo');
+        info.innerHTML = `<b>${sendFileEntries.length}</b> files, total <b>${(totalSendSize/1024/1024).toFixed(1)} MB</b><br>${sendFileEntries.slice(0,8).map(f=>f.name).join('<br>')}${sendFileEntries.length>8?'<br>...':''}`;
+        if (conn && conn.open) document.getElementById('sendAllBtn').disabled = false;
+        sendProgressMap = {};
+        await saveDB('sender', { remoteId: remotePeerId, files: sendFileEntries.map(f=>f.name) });
+      } catch(e) {}
+    });
+
+    document.getElementById('sendAllBtn').addEventListener('click', async () => {
+      if (!conn || !conn.open) return;
+      document.getElementById('senderProg').classList.remove('hidden');
+      document.getElementById('sendAllBtn').disabled = true;
+      document.getElementById('senderStatus').textContent = 'Preparing...';
+      conn.send(JSON.stringify({ type: 'transfer-start', totalFiles: sendFileEntries.length, totalSize: totalSendSize }));
+      await sendAllFiles();
+    });
+
+    async function sendAllFiles() {
+      for (const entry of sendFileEntries) {
+        const offset = sendProgressMap[entry.name] || 0;
+        await sendSingleFile(entry, offset);
+      }
+      conn.send(JSON.stringify({ type: 'transfer-end' }));
+      document.getElementById('senderStatus').textContent = '✅ All files sent!';
+    }
+
+    async function sendSingleFile(entry, offset) {
+      const file = await entry.fileHandle.getFile();
+      const name = entry.name, totalSize = file.size;
+      document.getElementById('senderStatus').textContent = `Sending: ${name} (from ${(offset/1024/1024).toFixed(1)} MB)`;
+      conn.send(JSON.stringify({ type: 'file-start', name, size: totalSize, offset }));
+      let sent = offset;
+      const chunkSize = 16384;
+      while (sent < totalSize) {
+        const end = Math.min(sent + chunkSize, totalSize);
+        const chunk = await file.slice(sent, end).arrayBuffer();
+        while (conn.dataChannel.bufferedAmount > 1024*1024) {
+          await new Promise(r => conn.dataChannel.addEventListener('bufferedamountlow', r, { once: true }));
+        }
+        conn.send(chunk);
+        sent = end;
+        sendProgressMap[name] = sent;
+        const overall = (Object.values(sendProgressMap).reduce((a,b)=>a+b,0)/totalSendSize)*100;
+        document.getElementById('senderProgFill').style.width = overall + '%';
+        if (sent % (chunkSize*10) === 0) conn.send(JSON.stringify({ type: 'ping' }));
+      }
+      conn.send(JSON.stringify({ type: 'file-end', name }));
+    }
+
+    async function resumeSending() {
+      for (const entry of sendFileEntries) {
+        const sent = sendProgressMap[entry.name] || 0;
+        if (sent < entry.size) await sendSingleFile(entry, sent);
+      }
+      conn.send(JSON.stringify({ type: 'transfer-end' }));
+      document.getElementById('senderStatus').textContent = '✅ Resume complete!';
+    }
+
+    // ================== RECEIVER ==================
+    document.getElementById('connectReceiverBtn').addEventListener('click', async () => {
+      startSilentAudio();
+      remotePeerId = document.getElementById('remoteIdInput').value.trim();
+      if (!remotePeerId) return alert('Please enter Sender ID');
+      peer = new Peer();
+      conn = peer.connect(remotePeerId, { reliable: true });
+      conn.on('open', () => {
+        document.getElementById('receiverReady').classList.remove('hidden');
+        document.getElementById('receiverStatus').textContent = 'Connected! Please select a folder.';
+        setupReceiverConnection();
+        (async () => {
+          const prev = await loadDB('receiver');
+          if (prev && prev.mainDirHandle) {
+            try {
+              const perm = await prev.mainDirHandle.requestPermission({ mode: 'readwrite' });
+              if (perm === 'granted') {
+                mainDirHandle = prev.mainDirHandle; tempDirHandle = prev.tempDirHandle;
+                dateFolderMode = prev.dateFolderMode || 'current';
+                document.getElementById('receiverStatus').textContent = 'Previous folder restored.';
+                document.getElementById('dateFolderChoice').classList.add('hidden');
+                document.getElementById('pickReceiveDirBtn').classList.add('hidden');
+                if (prev.files) receiveMap = prev.files;
+              }
+            } catch(e) {}
+          }
+        })();
+      });
+      peer.on('disconnected', () => tryReconnectReceiver());
+    });
+
+    function setupReceiverConnection() {
+      conn.on('data', async data => {
+        if (typeof data === 'string') {
+          const msg = JSON.parse(data);
+          if (msg.type === 'transfer-start') {
+            document.getElementById('receiverProg').classList.remove('hidden');
+            document.getElementById('receiverStatus').textContent = `Transfer started (${msg.totalFiles} files)`;
+          } else if (msg.type === 'file-start') await handleFileStart(msg);
+          else if (msg.type === 'file-end') await handleFileEnd(msg);
+          else if (msg.type === 'transfer-end') document.getElementById('receiverStatus').textContent = '🎉 All files saved!';
+          else if (msg.type === 'resume-request') {
+            const respFiles = [];
+            for (const f of msg.files) {
+              const info = receiveMap[f.name];
+              respFiles.push({ name: f.name, receivedBytes: info ? info.receivedBytes : 0 });
+            }
+            conn.send(JSON.stringify({ type: 'resume-response', files: respFiles }));
+          }
+        } else if (data instanceof ArrayBuffer) {
+          if (receiveCurrentFile && receiveCurrentFile.writer) {
+            await receiveCurrentFile.writer.write(new Uint8Array(data));
+            receiveCurrentFile.receivedBytes += data.byteLength;
+            receiveMap[receiveCurrentFile.name].receivedBytes = receiveCurrentFile.receivedBytes;
+            const totalRecv = Object.values(receiveMap).reduce((a,b)=>a+b.receivedBytes,0);
+            const totalAll = Object.values(receiveMap).reduce((a,b)=>a+b.totalSize,0);
+            if (totalAll) document.getElementById('receiverProgFill').style.width = ((totalRecv/totalAll)*100).toFixed(1)+'%';
+            await saveDB('receiver', { mainDirHandle, tempDirHandle, dateFolderMode, files: receiveMap });
+          }
+        }
+      });
+      conn.on('close', () => tryReconnectReceiver());
+    }
+
+    async function handleFileStart(msg) {
+      if (!tempDirHandle) { alert('Please select a folder first!'); return; }
+      const name = msg.name, totalSize = msg.size, offset = msg.offset || 0;
+      let fileHandle;
+      try { fileHandle = await tempDirHandle.getFileHandle(name, { create: offset === 0 }); }
+      catch(e) { fileHandle = await tempDirHandle.getFileHandle(name, { create: true }); }
+      const writer = await fileHandle.createWritable({ keepExistingData: offset > 0 });
+      if (offset === 0) await writer.truncate(0);
+      receiveCurrentFile = { name, totalSize, receivedBytes: offset, writer, fileHandle };
+      receiveMap[name] = { totalSize, receivedBytes: offset, tempFileHandle: fileHandle };
+      await saveDB('receiver', { mainDirHandle, tempDirHandle, dateFolderMode, files: receiveMap });
+    }
+
+    async function handleFileEnd(msg) {
+      if (receiveCurrentFile) {
+        await receiveCurrentFile.writer.close();
+        const name = receiveCurrentFile.name;
+        await moveFileToFinal(name, receiveCurrentFile.fileHandle);
+        receiveCurrentFile = null;
+        updateReceivedList(name);
+      }
+    }
+
+    async function moveFileToFinal(name, tempFileHandle) {
+      if (!mainDirHandle) return;
+      let destDirHandle = mainDirHandle;
+      if (dateFolderMode === 'current') {
+        const today = new Date().toISOString().slice(0,10);
+        destDirHandle = await mainDirHandle.getDirectoryHandle(today, { create: true });
+      } else {
+        try {
+          const file = await tempFileHandle.getFile();
+          const buffer = await file.arrayBuffer();
+          const exif = piexif.load(buffer);
+          const dateStr = exif["Exif"][piexif.ExifIFD.DateTimeOriginal];
+          if (dateStr) {
+            const [datePart] = dateStr.split(' ');
+            const formatted = datePart.replace(/:/g, '-');
+            destDirHandle = await mainDirHandle.getDirectoryHandle(formatted, { create: true });
+          } else {
+            const today = new Date().toISOString().slice(0,10);
+            destDirHandle = await mainDirHandle.getDirectoryHandle(today, { create: true });
+          }
+        } catch(e) {
+          const today = new Date().toISOString().slice(0,10);
+          destDirHandle = await mainDirHandle.getDirectoryHandle(today, { create: true });
+        }
+      }
+      const fileBlob = await tempFileHandle.getFile();
+      const newFileHandle = await destDirHandle.getFileHandle(name, { create: true });
+      const writer = await newFileHandle.createWritable();
+      await writer.write(fileBlob);
+      await writer.close();
+      await tempDirHandle.removeEntry(name);
+    }
+
+    function updateReceivedList(name) {
+      const div = document.createElement('div');
+      div.textContent = '✅ ' + name;
+      document.getElementById('receivedFileList').appendChild(div);
+    }
+
+    function tryReconnectReceiver() {
+      if (!remotePeerId) return;
+      let attempt = 0;
+      function attemptConnect() {
+        const delay = Math.min(1000 * Math.pow(2, attempt), 30000);
+        setTimeout(() => {
+          if (conn && conn.open) return;
+          try {
+            conn = peer.connect(remotePeerId, { reliable: true });
+            conn.on('open', () => {
+              attempt = 0;
+              setupReceiverConnection();
+              document.getElementById('receiverStatus').textContent = 'Reconnected, waiting for files...';
+            });
+            conn.on('error', () => { attempt++; attemptConnect(); });
+          } catch(e) { attempt++; attemptConnect(); }
+        }, delay);
+      }
+      attemptConnect();
+    }
+
+    // Folder selection & date mode
+    document.getElementById('pickReceiveDirBtn').addEventListener('click', async () => {
+      try {
+        mainDirHandle = await window.showDirectoryPicker();
+        tempDirHandle = await mainDirHandle.getDirectoryHandle('_temp', { create: true });
+        document.getElementById('dateFolderChoice').classList.remove('hidden');
+        document.getElementById('receiverStatus').textContent = 'Choose date folder mode.';
+        document.getElementById('pickReceiveDirBtn').classList.add('hidden');
+        receiveMap = {};
+        await saveDB('receiver', { mainDirHandle, tempDirHandle, dateFolderMode, files: receiveMap });
+      } catch(e) {}
+    });
+
+    document.getElementById('choiceCurrentDate').addEventListener('click', () => {
+      dateFolderMode = 'current';
+      document.getElementById('dateFolderChoice').classList.add('hidden');
+      document.getElementById('receiverStatus').textContent = 'Files will be saved under today\'s date folder.';
+      saveDB('receiver', { mainDirHandle, tempDirHandle, dateFolderMode, files: receiveMap });
+    });
+
+    document.getElementById('choiceOriginalDate').addEventListener('click', () => {
+      dateFolderMode = 'original';
+      document.getElementById('dateFolderChoice').classList.add('hidden');
+      document.getElementById('receiverStatus').textContent = 'Files will be saved under original EXIF date folder.';
+      saveDB('receiver', { mainDirHandle, tempDirHandle, dateFolderMode, files: receiveMap });
+    });
+
+    // ================== QR SCANNER (FLAWLESS – NO OVERLAY) ==================
+    const cameraInput = document.getElementById('cameraInput');
+    const galleryInput = document.getElementById('galleryInput');
+
+    function processQRFromFile(file) {
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = ev => {
+        const img = new Image();
+        img.onload = () => {
+          const canvas = document.createElement('canvas');
+          canvas.width = img.width;
+          canvas.height = img.height;
+          const ctx = canvas.getContext('2d');
+          ctx.drawImage(img, 0, 0);
+          const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+          const code = jsQR(imageData.data, imageData.width, imageData.height);
+          if (code) {
+            document.getElementById('remoteIdInput').value = code.data;
+            alert('QR code scanned successfully!');
+          } else {
+            alert('No QR code found in the image. Please try again.');
+          }
+        };
+        img.src = ev.target.result;
+      };
+      reader.readAsDataURL(file);
+    }
+
+    // Camera scan button triggers hidden camera input
+    document.getElementById('scanCameraBtn').addEventListener('click', () => {
+      cameraInput.click();
+    });
+
+    cameraInput.addEventListener('change', (e) => {
+      const file = e.target.files[0];
+      processQRFromFile(file);
+      cameraInput.value = ''; // allow re-selection
+    });
+
+    // Gallery scan button triggers hidden gallery input
+    document.getElementById('scanGalleryBtn').addEventListener('click', () => {
+      galleryInput.click();
+    });
+
+    galleryInput.addEventListener('change', (e) => {
+      const file = e.target.files[0];
+      processQRFromFile(file);
+      galleryInput.value = '';
+    });
+  </script>
+</body>
+</html>
